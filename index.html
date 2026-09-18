@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Diario dell'assistenza</title>
+<meta name="theme-color" content="#1B2030" />
+<meta name="description" content="Diario delle notti e degli episodi per chi assiste una persona con demenza." />
+<link rel="manifest" href="./manifest.webmanifest" />
+<link rel="icon" href="./icon-192.png" />
+<link rel="apple-touch-icon" href="./icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Diario" />
+<style>
+  html, body { margin: 0; padding: 0; background: #1B2030; color: #EDE6D8; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  @media (prefers-color-scheme: light) { html, body { background: #ECEEF3; color: #1B2030; } }
+  #boot { padding: 28px 16px; font-size: 17px; opacity: .75; }
+</style>
+</head>
+<body>
+<div id="root"><div id="boot">Apro il diario…</div></div>
+<script src="./app.js"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("./sw.js").catch(function () { /* l'app funziona lo stesso */ });
+    });
+  }
+</script>
+</body>
+</html>
