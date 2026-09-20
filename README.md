@@ -12,9 +12,13 @@ Nasce da un foglio di calcolo usato tutti i giorni, di cui mantiene le stesse co
 
 **La terapia:** un promemoria degli orari delle medicine, con l'elenco dei farmaci da dare a ciascun orario e una nota facoltativa, per esempio "a stomaco pieno". L'orario più vicino al momento in cui apri l'app è evidenziato. È solo un promemoria: non registra le somministrazioni.
 
+**La glicemia:** le misurazioni fatte con il glucometro, con valore, ora e momento della giornata (a digiuno, prima o dopo il pasto, sera) e una nota.
+
 **Il riepilogo del mese:** media dei risvegli, minuti medi di assistenza, media delle ore di sonno di chi assiste, notti agitate, episodi e loro durata media. Un grafico mostra le notti del mese, con l'altezza delle barre pari alle ore di sonno di chi assiste, il colore pari all'agitazione e, sotto la linea di base, un pallino nei giorni in cui c'è stata evacuazione. Segnala anche i cali del sonno di chi assiste rispetto al mese precedente e i giorni consecutivi senza evacuazione, che nella demenza è una causa frequente di agitazione.
 
-Da lì si scarica un file Excel con riepilogo, notti, episodi e terapia, da portare alla visita.
+Un secondo grafico, con la stessa scala dei giorni, mette le misurazioni della glicemia sopra i giorni in cui ci sono stati episodi, così le due cose si leggono in colonna e si vede se cadono insieme.
+
+Da lì si scarica un file Excel con riepilogo, notti, episodi, glicemia e terapia, da portare alla visita.
 
 ## Come si usa
 
