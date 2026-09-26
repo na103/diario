@@ -12,6 +12,7 @@ import {
   Moon, Sun, Activity, List, BarChart3, Settings, Plus, Minus,
   Trash2, Download, Upload, ChevronLeft, ChevronRight, X, Pill, Pencil, Droplet, Coffee,
 } from "lucide-react";
+import { version as APP_VERSION } from "../package.json";
 
 /* ------------------------------------------------------------------ */
 /*  Costanti                                                           */
@@ -1477,6 +1478,10 @@ function SettingsSheet({ data, onClose, onImport, onRestore, onExport, onClear, 
 
         <Section title="Cancella tutto" hint="Elimina tutte le notti e gli episodi da questa app. Non si può annullare.">
           <ConfirmDelete label="Cancella tutti i dati" onConfirm={onClear} />
+        </Section>
+
+        <Section title="Versione">
+          <p style={{ margin: 0 }}>Diario dell'assistenza {APP_VERSION}</p>
         </Section>
 
         <section className="sec" style={{ borderBottom: "none" }}>

@@ -1,6 +1,6 @@
 {
   "name": "diario-assistenza",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Diario delle notti, degli episodi, della terapia, della glicemia e della pressione per chi assiste una persona con demenza.",
   "license": "GPL-3.0-or-later",
@@ -14,7 +14,7 @@
     "lucide-react": "0.383.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "xlsx": "0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "esbuild": "0.28.2"
