@@ -33,12 +33,27 @@ Usa sempre lo stesso browser: le memorie di browser diversi sono separate, e un 
 I file vanno nella cartella principale del repository, con GitHub Pages attivo su `main` e cartella `/ (root)`. L'app è poi raggiungibile all'indirizzo delle pagine del repository.
 
 - `index.html` — la pagina
-- `app.js` — l'applicazione, già compilata
+- `app.js` — l'applicazione, già compilata (generata da `src/`, non si modifica a mano)
 - `manifest.webmanifest` — nome, colori e icone per l'installazione
 - `sw.js` — il service worker, che la tiene disponibile offline
 - `icon-192.png`, `icon-512.png`, `icon-maskable-512.png` — le icone
 
 Per aggiornarla basta sostituire `app.js`: l'indirizzo resta lo stesso e i dati sul telefono non si toccano.
+
+## Modificare l'app
+
+Il codice leggibile sta in `src/`: `app.jsx` è l'applicazione intera (un solo file, React senza framework) e `main.jsx` la aggancia alla pagina. `app.js` nella cartella principale è il risultato della compilazione, quindi va rigenerato e non corretto a mano.
+
+```
+npm install
+npm run build     # riscrive app.js
+npm run watch     # ricompila a ogni salvataggio, mentre si lavora
+npm run serve     # http://localhost:8080 per provare in locale
+```
+
+Le versioni delle librerie sono fissate in `package.json`: con queste, `npm run build` produce esattamente l'`app.js` pubblicato. Dopo la compilazione si committano sia `src/` sia `app.js`, perché GitHub Pages serve il file compilato così com'è.
+
+Il service worker tiene una copia dei file per farli funzionare offline, quindi dopo un aggiornamento può servire riaprire l'app una volta, o svuotare la cache del browser (solo "immagini e file memorizzati nella cache", mai "cookie e dati dei siti", che cancellerebbe il diario).
 
 ## Note
 
