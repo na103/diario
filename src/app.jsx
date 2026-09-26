@@ -1,8 +1,16 @@
+// Diario dell'assistenza
+// Copyright (C) 2026 na103
+//
+// Questo programma è software libero: puoi ridistribuirlo e/o modificarlo secondo i termini
+// della GNU General Public License pubblicata dalla Free Software Foundation, versione 3
+// o (a tua scelta) qualunque versione successiva. È distribuito senza alcuna garanzia.
+// Il testo completo è nel file LICENSE.
+
 import { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
 import {
   Moon, Sun, Activity, List, BarChart3, Settings, Plus, Minus,
-  Trash2, Download, Upload, ChevronLeft, ChevronRight, X, Pill, Pencil, Droplet,
+  Trash2, Download, Upload, ChevronLeft, ChevronRight, X, Pill, Pencil, Droplet, Coffee,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -37,6 +45,17 @@ const GLU_TAGS = ["A digiuno", "Prima del pasto", "Dopo il pasto", "Sera", "Altr
 // Colori solo indicativi, per leggere il grafico a colpo d'occhio: i valori di riferimento li dà il medico.
 const gluColor = (v) => (v == null ? "var(--muted)" : v < 70 ? "var(--a3)" : v <= 180 ? "var(--a0)" : v <= 250 ? "var(--a2)" : "var(--a3)");
 
+// Pressione misurata a casa (ESH 2023): 135/85 è il limite della norma, da 160/100 è decisamente alta.
+// Verso il basso conta solo la massima: sotto 100 è bassa, sotto 90 è ipotensione.
+const bpLevel = (s, d) => {
+  if (s == null || d == null) return null;
+  if (s >= 160 || d >= 100 || s < 90) return 3;
+  if (s >= 135 || d >= 85 || s < 100) return 1;
+  return 0;
+};
+const bpColor = (s, d) => { const l = bpLevel(s, d); return l == null ? "var(--muted)" : `var(--a${l})`; };
+const BP_LEGEND = [{ l: 0, label: "nella norma" }, { l: 1, label: "da tenere d'occhio" }, { l: 3, label: "alta o bassa" }];
+
 const GIORNI = ["domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"];
 const GIORNI_XLS = ["Domenica", "Lunedi", "Martedi", "Mercoledi", "Giovedi", "Venerdi", "Sabato"];
 const MESI = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio",
@@ -69,6 +88,24 @@ const fmtHM = (x) => { if (x == null || isNaN(x)) return "–"; const { h, m } =
 const defaultNightDate = () => { const now = new Date(); const d = toISO(now); return now.getHours() < 14 ? addDays(d, -1) : d; };
 
 const avg = (arr) => { const v = arr.filter((x) => x != null && !isNaN(x)); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+const roundOrNull = (x) => (x == null ? null : Math.round(x));
+
+// Media delle due misurazioni di pressione; conta solo quelle con massima e minima
+function bpAvg(b) {
+  const rs = [[b.s1, b.d1, b.p1], [b.s2, b.d2, b.p2]].filter(([s, d]) => s != null && d != null);
+  if (!rs.length) return null;
+  return { sys: roundOrNull(avg(rs.map((r) => r[0]))), dia: roundOrNull(avg(rs.map((r) => r[1]))), pulse: roundOrNull(avg(rs.map((r) => r[2]))), n: rs.length };
+}
+
+// Una misurazione per giorno, la prima della giornata: { "2026-09-01": media, ... }
+function bpByDay(bp, ym) {
+  const out = {};
+  [...bp].filter((b) => b.date.startsWith(ym)).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+    .forEach((b) => { const a = bpAvg(b); if (a && !out[b.date]) out[b.date] = a; });
+  return out;
+}
+
+const bpMean = (list) => (list.length ? { sys: roundOrNull(avg(list.map((a) => a.sys))), dia: roundOrNull(avg(list.map((a) => a.dia))) } : null);
 
 function monthStats(data, ym) {
   const ns = data.nights.filter((n) => n.date.startsWith(ym));
@@ -82,6 +119,7 @@ function monthStats(data, ym) {
     agitated: ns.filter((n) => n.agit != null && n.agit >= 2).length,
     episodes: es.length,
     glu: (data.glucose || []).filter((g) => g.date.startsWith(ym) && g.value != null),
+    bp: Object.values(bpByDay(data.bp || [], ym)),
     epDur: avg(es.map((e) => duration(e.start, e.end))),
   };
 }
@@ -174,7 +212,9 @@ function mergeData(stored, cur) {
   const gk = (g) => `${g.date}|${g.time}`;
   const gm = new Map((stored.glucose || []).map((g) => [gk(g), g]));
   (cur.glucose || []).forEach((g) => gm.set(gk(g), g));
-  return { ...cur, therapy: [...tm.values()].map((t) => ({ ...t, id: t.id || uid() })), glucose: [...gm.values()].map((g) => ({ ...g, id: g.id || uid() })), nights: [...nm.values()].map((n) => ({ ...n, id: n.id || uid() })), episodes: [...em.values()].map((e) => ({ ...e, id: e.id || uid() })) };
+  const bm = new Map((stored.bp || []).map((b) => [gk(b), b]));
+  (cur.bp || []).forEach((b) => bm.set(gk(b), b));
+  return { ...cur, therapy: [...tm.values()].map((t) => ({ ...t, id: t.id || uid() })), glucose: [...gm.values()].map((g) => ({ ...g, id: g.id || uid() })), bp: [...bm.values()].map((b) => ({ ...b, id: b.id || uid() })), nights: [...nm.values()].map((n) => ({ ...n, id: n.id || uid() })), episodes: [...em.values()].map((e) => ({ ...e, id: e.id || uid() })) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -198,13 +238,14 @@ function buildWorkbook(data) {
 
   // Riepilogo
   const months = monthsWithData(data);
-  const rh = ["Mese", "Notti registrate", "Media risvegli", "Media min. assistenza", "Mie ore di sonno (media)", "Notti agitate (>=2)", "Episodi diurni", "Durata media episodi (min)"];
+  const rh = ["Mese", "Notti registrate", "Media risvegli", "Media min. assistenza", "Mie ore di sonno (media)", "Notti agitate (>=2)", "Episodi diurni", "Durata media episodi (min)", "Pressione media"];
   const rrows = months.map((ym) => {
     const s = monthStats(data, ym);
-    return [monthLabel(ym), s.nights, round1(s.wakes), round1(s.assist), round1(s.mySleep), s.agitated, s.episodes, round1(s.epDur)];
+    const bm = bpMean(s.bp);
+    return [monthLabel(ym), s.nights, round1(s.wakes), round1(s.assist), round1(s.mySleep), s.agitated, s.episodes, round1(s.epDur), bm ? `${bm.sys}/${bm.dia}` : null];
   });
   const wsR = XLSX.utils.aoa_to_sheet([rh, ...rrows]);
-  wsR["!cols"] = [16, 15, 14, 20, 22, 18, 14, 24].map((w) => ({ wch: w }));
+  wsR["!cols"] = [16, 15, 14, 20, 22, 18, 14, 24, 16].map((w) => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, wsR, "Riepilogo");
 
   // Diario notti
@@ -246,6 +287,21 @@ function buildWorkbook(data) {
     XLSX.utils.book_append_sheet(wb, wsG, "Glicemia");
   }
 
+  // Pressione
+  const bh = ["Data", "Ora", "Massima 1", "Minima 1", "Battiti 1", "Massima 2", "Minima 2", "Battiti 2", "Massima (media)", "Minima (media)", "Battiti (media)", "Note"];
+  const bps = [...(data.bp || [])].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  if (bps.length) {
+    const brows = bps.map((b) => {
+      const a = bpAvg(b) || {};
+      return [serial(b.date), tfrac(b.time), b.s1, b.d1, b.p1, b.s2, b.d2, b.p2, a.sys ?? null, a.dia ?? null, a.pulse ?? null, b.note || null];
+    });
+    const wsB = XLSX.utils.aoa_to_sheet([bh, ...brows]);
+    fmtCells(wsB, brows.length, 0, "dd/mm/yyyy");
+    fmtCells(wsB, brows.length, 1, "hh:mm");
+    wsB["!cols"] = [12, 8, 10, 9, 9, 10, 9, 9, 15, 14, 14, 40].map((w) => ({ wch: w }));
+    XLSX.utils.book_append_sheet(wb, wsB, "Pressione");
+  }
+
   // Terapia
   const th = ["Ora", "Farmaci", "Note"];
   const ther = [...(data.therapy || [])].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
@@ -268,7 +324,7 @@ function xlsxFile(data) {
 }
 
 function backupFile(data) {
-  const text = JSON.stringify({ nights: data.nights, episodes: data.episodes, therapy: data.therapy || [], glucose: data.glucose || [], savedAt: new Date().toISOString() }, null, 1);
+  const text = JSON.stringify({ nights: data.nights, episodes: data.episodes, therapy: data.therapy || [], glucose: data.glucose || [], bp: data.bp || [], savedAt: new Date().toISOString() }, null, 1);
   return new File([text], `diario_backup_${toISO(new Date())}.json`, { type: "application/json" });
 }
 
@@ -333,10 +389,15 @@ async function parseXlsx(file) {
   const glucose = rowsOf("Glicemia").map((r) => ({
     date: serToISO(r[0]), time: fracToHM(r[1]), value: cellNum(r[2]), tag: cellTxt(r[3]), note: cellTxt(r[4]),
   })).filter((g) => g.value != null);
+  const bp = rowsOf("Pressione").map((r) => ({
+    date: serToISO(r[0]), time: fracToHM(r[1]),
+    s1: cellNum(r[2]), d1: cellNum(r[3]), p1: cellNum(r[4]), s2: cellNum(r[5]), d2: cellNum(r[6]), p2: cellNum(r[7]),
+    note: cellTxt(r[11]),
+  })).filter((b) => bpAvg(b));
   const therapy = rowsOf("Terapia", "Ora").map((r) => ({
     time: fracToHM(r[0]), meds: cellTxt(r[1]), note: cellTxt(r[2]),
   })).filter((t) => t.time);
-  return { nights, episodes, therapy, glucose };
+  return { nights, episodes, therapy, glucose, bp };
 }
 
 function downloadFile(file) {
@@ -436,6 +497,9 @@ const CSS = `
 .tab svg{flex-shrink:0;}
 @media (max-width:359px){.tab{font-size:9.5px;}}
 .tab[aria-current="page"]{color:var(--accent);font-weight:700;}
+.bprow{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.bprow label{display:flex;flex-direction:column;gap:4px;}
+.bprow .input{font-size:22px;font-weight:700;text-align:center;padding:0 4px;}
 .seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:8px 0 16px;}
 .seg button{height:46px;border:none;background:transparent;}
 .seg button[aria-pressed="true"]{background:var(--raised);font-weight:700;color:var(--accent);}
@@ -927,6 +991,125 @@ function Glicemia({ items, onSave, onDelete }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Pressione                                                          */
+/* ------------------------------------------------------------------ */
+
+const blankBp = () => ({ id: null, date: toISO(new Date()), time: nowHM(), s1: null, d1: null, p1: null, s2: null, d2: null, p2: null, note: "" });
+
+function BpReading({ f, n, set }) {
+  const field = (k, label) => (
+    <label>
+      <span className="muted small">{label}</span>
+      <input className="input" inputMode="numeric" placeholder="---"
+        aria-label={`${label}, ${n === 1 ? "prima" : "seconda"} misurazione`}
+        value={f[k + n] ?? ""}
+        onChange={(e) => { const v = e.target.value.replace(/\D/g, "").slice(0, 3); set(k + n, v === "" ? null : Number(v)); }} />
+    </label>
+  );
+  return <div className="bprow">{field("s", "Massima")}{field("d", "Minima")}{field("p", "Battiti")}</div>;
+}
+
+function Pressione({ items, onSave, onDelete }) {
+  const [f, setF] = useState(blankBp);
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const today = toISO(new Date());
+  const a = bpAvg(f);
+  const recenti = [...items].sort((x, y) => (y.date + y.time).localeCompare(x.date + x.time)).slice(0, 10);
+
+  return (
+    <div>
+      <div className="nighthead">
+        <div className="mid">
+          <h1 className="h1" style={{ marginBottom: 4 }}>{f.id ? "Modifica misurazione" : "Pressione"}</h1>
+        </div>
+        {f.id && <button type="button" className="iconbtn ghost" aria-label="Annulla la modifica" onClick={() => setF(blankBp())}><X /></button>}
+      </div>
+
+      <Section title="Prima misurazione"><BpReading f={f} n={1} set={set} /></Section>
+      <Section title="Seconda misurazione"><BpReading f={f} n={2} set={set} /></Section>
+
+      <Section title="Media">
+        {a ? (
+          <div className="row" style={{ alignItems: "baseline" }}>
+            <span style={{ fontSize: 30, fontWeight: 700, color: bpColor(a.sys, a.dia) }}>{a.sys}/{a.dia}</span>
+            <span className="unit">mmHg</span>
+            {a.pulse != null && <span className="unit">{a.pulse} battiti</span>}
+          </div>
+        ) : (
+          <p className="hint" style={{ margin: 0 }}>Compare quando inserisci massima e minima.</p>
+        )}
+      </Section>
+
+      <Section title="Quando">
+        <div className="row">
+          <input type="date" className="input" style={{ maxWidth: 190 }} value={f.date} max={today}
+            aria-label="Data" onChange={(e) => e.target.value && set("date", e.target.value)} />
+          <input type="time" className="input timein" value={f.time} aria-label="Ora" onChange={(e) => set("time", e.target.value)} />
+        </div>
+        <button type="button" className="linkbtn" onClick={() => setF((p) => ({ ...p, date: today, time: nowHM() }))}>Adesso</button>
+      </Section>
+
+      <Section title="Nota">
+        <input className="input" value={f.note} onChange={(e) => set("note", e.target.value)} />
+      </Section>
+
+      {f.id && (
+        <div style={{ padding: "8px 0 4px" }}>
+          <ConfirmDelete label="Elimina questa misurazione" onConfirm={() => { onDelete(f.id); setF(blankBp()); }} />
+        </div>
+      )}
+
+      {!!recenti.length && (
+        <section className="sec">
+          <h2 className="sech">Ultime misurazioni</h2>
+          <div style={{ height: 8 }} />
+          {recenti.map((b) => {
+            const m = bpAvg(b);
+            const col = m ? bpColor(m.sys, m.dia) : "var(--muted)";
+            return (
+              <button key={b.id} type="button" className="entry" style={{ "--c": col }} onClick={() => setF({ ...b })}>
+                <span className="bar" />
+                <span className="grow">
+                  <span className="t"><span style={{ color: col }}>{m ? `${m.sys}/${m.dia}` : "–"}</span> <span className="muted small">mmHg</span></span>
+                  <span className="d">
+                    <span>{fmtDayShort(b.date)}, {b.time}</span>
+                    {m && m.pulse != null && <span>{m.pulse} battiti</span>}
+                    {m && m.n === 2 && <span>media di 2</span>}
+                  </span>
+                  {b.note && <span className="n">{b.note}</span>}
+                </span>
+              </button>
+            );
+          })}
+        </section>
+      )}
+
+      <div className="savebar"><div className="inner">
+        <button type="button" className="btn primary" disabled={!a}
+          onClick={() => { onSave(f); setF(blankBp()); }}>
+          {f.id ? "Salva le modifiche" : "Salva la misurazione"}
+        </button>
+      </div></div>
+    </div>
+  );
+}
+
+// Glicemia e pressione condividono la scheda: la barra in basso non ha posto per un'altra icona
+function Misure({ kind, setKind, glucose, bp, onSaveGlu, onDeleteGlu, onSaveBp, onDeleteBp }) {
+  return (
+    <div>
+      <div className="seg" style={{ marginTop: 6 }}>
+        <button type="button" aria-pressed={kind === "glicemia"} onClick={() => setKind("glicemia")}>Glicemia</button>
+        <button type="button" aria-pressed={kind === "pressione"} onClick={() => setKind("pressione")}>Pressione</button>
+      </div>
+      {kind === "pressione"
+        ? <Pressione items={bp} onSave={onSaveBp} onDelete={onDeleteBp} />
+        : <Glicemia items={glucose} onSave={onSaveGlu} onDelete={onDeleteGlu} />}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Diario (elenco)                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -1079,6 +1262,43 @@ function GlucoseChart({ data, ym }) {
   );
 }
 
+// Una barra per giorno, dalla minima alla massima, sulla stessa scala dei giorni degli altri grafici
+function BpChart({ data, ym }) {
+  const [y, m] = ym.split("-").map(Number);
+  const days = new Date(y, m, 0).getDate();
+  const W = days * 12, top = 8, base = 100, lo = 40, hi = 200;
+  const yOf = (v) => base - ((Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * (base - top);
+  const xOf = (iso) => (Number(iso.slice(8, 10)) - 1) * 12 + 5.5;
+  const byDay = bpByDay(data.bp || [], ym);
+
+  return (
+    <svg className="chart" viewBox={`0 0 ${W} ${base + 22}`} width="100%" role="img"
+      aria-label="Pressione del mese: una barra per giorno, dalla minima alla massima, colorata secondo la media">
+      {[85, 135].map((v) => (
+        <g key={v}>
+          <line x1="0" x2={W} y1={yOf(v)} y2={yOf(v)} style={{ stroke: "var(--line)" }} strokeDasharray="3 3" />
+          <text x={W - 2} y={yOf(v) - 2} fontSize="8" textAnchor="end" style={{ fill: "var(--muted)" }}>{v}</text>
+        </g>
+      ))}
+      <line x1="0" x2={W} y1={base} y2={base} style={{ stroke: "var(--line)" }} />
+      {Object.entries(byDay).map(([iso, a]) => {
+        const x = xOf(iso), col = bpColor(a.sys, a.dia);
+        return (
+          <g key={iso}>
+            <line x1={x} x2={x} y1={yOf(a.sys)} y2={yOf(a.dia)} strokeWidth="2.5" strokeLinecap="round" style={{ stroke: col }} />
+            <circle cx={x} cy={yOf(a.sys)} r="3" style={{ fill: col }} />
+            <circle cx={x} cy={yOf(a.dia)} r="3" style={{ fill: col }} />
+          </g>
+        );
+      })}
+      {Array.from({ length: days }, (_, i) => (
+        (i === 0 || (i + 1) % 5 === 0) &&
+        <text key={i} x={i * 12 + 5.5} y={base + 16} fontSize="8.5" textAnchor="middle" style={{ fill: "var(--muted)" }}>{i + 1}</text>
+      ))}
+    </svg>
+  );
+}
+
 function Riepilogo({ data, onExport, onSettings }) {
   const months = monthsWithData(data);
   const cur = toISO(new Date()).slice(0, 7);
@@ -1147,6 +1367,24 @@ function Riepilogo({ data, onExport, onSettings }) {
         </section>
       )}
 
+      {s.bp.length > 0 && (() => {
+        const bm = bpMean(s.bp);
+        return (
+          <section className="sec">
+            <h2 className="sech">Pressione</h2>
+            <div style={{ height: 4 }} />
+            <BpChart data={data} ym={ym} />
+            <div className="legend">
+              {BP_LEGEND.map((l) => <span key={l.l} style={{ "--c": `var(--a${l.l})` }}><i />{l.label}</span>)}
+            </div>
+            <p className="hint" style={{ marginTop: 8 }}>
+              Ogni barra va dalla minima alla massima del giorno, media delle due misurazioni.
+              {" "}Media del mese: <b style={{ color: bpColor(bm.sys, bm.dia) }}>{bm.sys}/{bm.dia}</b> mmHg su {plural(s.bp.length, "giorno", "giorni")}.
+            </p>
+          </section>
+        );
+      })()}
+
       <section className="sec">
         <table className="stats"><tbody>
           <tr><td>Media risvegli</td><td>{fmtNum(s.wakes)}</td></tr>
@@ -1169,7 +1407,7 @@ function Riepilogo({ data, onExport, onSettings }) {
 
       <section className="sec">
         <button type="button" className="btn wide" onClick={onExport}><Download size={20} />Scarica Excel per la visita</button>
-        <p className="hint" style={{ marginTop: 8 }}>Contiene il riepilogo di tutti i mesi, il diario delle notti, gli episodi e la terapia. Una volta scaricato lo condividi dai download, con il tasto condividi del telefono.</p>
+        <p className="hint" style={{ marginTop: 8 }}>Contiene il riepilogo di tutti i mesi, il diario delle notti, gli episodi, la glicemia, la pressione e la terapia. Una volta scaricato lo condividi dai download, con il tasto condividi del telefono.</p>
       </section>
     </div>
   );
@@ -1240,6 +1478,13 @@ function SettingsSheet({ data, onClose, onImport, onRestore, onExport, onClear, 
         <Section title="Cancella tutto" hint="Elimina tutte le notti e gli episodi da questa app. Non si può annullare.">
           <ConfirmDelete label="Cancella tutti i dati" onConfirm={onClear} />
         </Section>
+
+        <section className="sec" style={{ borderBottom: "none" }}>
+          <p style={{ margin: "0 0 12px" }}>Se ti piace, considera di supportarmi con un caffè.</p>
+          <a className="btn" href="https://ko-fi.com/na103" target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none", color: "var(--text)" }}>
+            <Coffee size={18} />Offrimi un caffè su Ko-fi
+          </a>
+        </section>
       </div>
     </div>
   );
@@ -1250,11 +1495,12 @@ function SettingsSheet({ data, onClose, onImport, onRestore, onExport, onClear, 
 /* ------------------------------------------------------------------ */
 
 export default function App() {
-  const [data, setData] = useState({ nights: [], episodes: [], therapy: [], glucose: [], theme: "night" });
+  const [data, setData] = useState({ nights: [], episodes: [], therapy: [], glucose: [], bp: [], theme: "night" });
   const [status, setStatus] = useState("loading"); // loading | ready | memory | unreadable
   const [saveErr, setSaveErr] = useState(null);
   const [notice, setNotice] = useState(null); // { kind, detail }
   const [tab, setTab] = useState("notte");
+  const [measureKind, setMeasureKind] = useState("glicemia");
   const [nightDate, setNightDate] = useState(defaultNightDate);
   const [nonce, setNonce] = useState(0);
   const [editEpId, setEditEpId] = useState(null);
@@ -1277,7 +1523,7 @@ export default function App() {
     if (r.status === "ok") {
       const d = r.data || {};
       setData((cur) => {
-        const loaded = { nights: d.nights || [], episodes: d.episodes || [], therapy: d.therapy || [], glucose: d.glucose || [], theme: d.theme || cur.theme || "night" };
+        const loaded = { nights: d.nights || [], episodes: d.episodes || [], therapy: d.therapy || [], glucose: d.glucose || [], bp: d.bp || [], theme: d.theme || cur.theme || "night" };
         // se nel frattempo era stato inserito qualcosa, lo tengo
         if (cur.nights.length || cur.episodes.length) { skipSave.current = false; return mergeData(loaded, cur); }
         return loaded;
@@ -1394,6 +1640,16 @@ export default function App() {
     toast("Misurazione eliminata");
   };
 
+  const saveBp = (b) => {
+    const isNew = !b.id;
+    setData((d) => ({ ...d, bp: [...(d.bp || []).filter((x) => x.id !== b.id), { ...b, id: b.id || uid() }] }));
+    toast(isNew ? "Misurazione salvata" : "Misurazione aggiornata");
+  };
+  const deleteBp = (id) => {
+    setData((d) => ({ ...d, bp: (d.bp || []).filter((x) => x.id !== id) }));
+    toast("Misurazione eliminata");
+  };
+
   const mergeIn = (inc, msg) => {
     setData((d) => {
       const nm = new Map(d.nights.map((n) => [n.date, n]));
@@ -1406,19 +1662,21 @@ export default function App() {
       const gk = (g) => `${g.date}|${g.time}`;
       const gm = new Map((d.glucose || []).map((g) => [gk(g), g]));
       (inc.glucose || []).forEach((g) => gm.set(gk(g), { ...g, id: gm.get(gk(g))?.id || uid() }));
-      return { ...d, nights: [...nm.values()], episodes: [...em.values()], therapy: [...tm.values()], glucose: [...gm.values()] };
+      const bm = new Map((d.bp || []).map((b) => [gk(b), b]));
+      (inc.bp || []).forEach((b) => bm.set(gk(b), { ...b, id: bm.get(gk(b))?.id || uid() }));
+      return { ...d, nights: [...nm.values()], episodes: [...em.values()], therapy: [...tm.values()], glucose: [...gm.values()], bp: [...bm.values()] };
     });
     setNonce((x) => x + 1);
     toast(msg || `Importate ${plural(inc.nights.length, "notte", "notti")} e ${plural(inc.episodes.length, "episodio", "episodi")}`);
   };
   const restore = (d) => {
-    setData((old) => ({ ...old, nights: d.nights.map((n) => ({ ...n, id: n.id || uid() })), episodes: d.episodes.map((e) => ({ ...e, id: e.id || uid() })), therapy: (d.therapy || []).map((t) => ({ ...t, id: t.id || uid() })), glucose: (d.glucose || []).map((g) => ({ ...g, id: g.id || uid() })) }));
+    setData((old) => ({ ...old, nights: d.nights.map((n) => ({ ...n, id: n.id || uid() })), episodes: d.episodes.map((e) => ({ ...e, id: e.id || uid() })), therapy: (d.therapy || []).map((t) => ({ ...t, id: t.id || uid() })), glucose: (d.glucose || []).map((g) => ({ ...g, id: g.id || uid() })), bp: (d.bp || []).map((b) => ({ ...b, id: b.id || uid() })) }));
     setNonce((x) => x + 1);
     setShowSettings(false);
     toast("Backup ripristinato");
   };
   const clearAll = () => {
-    setData((d) => ({ ...d, nights: [], episodes: [], therapy: [], glucose: [] }));
+    setData((d) => ({ ...d, nights: [], episodes: [], therapy: [], glucose: [], bp: [] }));
     setNonce((x) => x + 1);
     setShowSettings(false);
     toast("Dati cancellati");
@@ -1436,7 +1694,7 @@ export default function App() {
     { id: "notte", label: "Notte", Icon: Moon },
     { id: "episodio", label: "Episodi", Icon: Activity },
     { id: "terapia", label: "Terapia", Icon: Pill },
-    { id: "glicemia", label: "Glicemia", Icon: Droplet },
+    { id: "glicemia", label: "Misure", Icon: Droplet },
     { id: "diario", label: "Diario", Icon: List },
     { id: "riepilogo", label: "Riepilogo", Icon: BarChart3 },
   ];
@@ -1502,7 +1760,8 @@ export default function App() {
               <Terapia items={data.therapy || []} onSave={saveTherapy} onDelete={deleteTherapy} />
             )}
             {tab === "glicemia" && (
-              <Glicemia items={data.glucose || []} onSave={saveGlucose} onDelete={deleteGlucose} />
+              <Misure kind={measureKind} setKind={setMeasureKind} glucose={data.glucose || []} bp={data.bp || []}
+                onSaveGlu={saveGlucose} onDeleteGlu={deleteGlucose} onSaveBp={saveBp} onDeleteBp={deleteBp} />
             )}
             {tab === "diario" && (
               <Diario data={data} onSettings={() => setShowSettings(true)}
