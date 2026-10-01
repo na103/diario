@@ -134,7 +134,7 @@ function noPoopStreak(nights) {
 }
 
 const monthsWithData = (data) =>
-  [...new Set([...data.nights, ...data.episodes].map((x) => x.date.slice(0, 7)))].sort();
+  [...new Set([...data.nights, ...data.episodes, ...(data.glucose || []), ...(data.bp || [])].map((x) => x.date.slice(0, 7)))].sort();
 
 function recentDistinct(items, field, max = 3) {
   const out = [];
@@ -910,11 +910,30 @@ function Terapia({ items, onSave, onDelete }) {
 /*  Glicemia                                                           */
 /* ------------------------------------------------------------------ */
 
+// Il modulo vuoto prende data e ora quando si apre. Se l'app resta in sottofondo fino al giorno dopo,
+// al ritorno le riporta ad adesso, a meno che non siano state cambiate a mano o si stia modificando una misurazione.
+function useFreshDate(setF) {
+  const manual = useRef(false);
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== "visible" || manual.current) return;
+      const today = toISO(new Date());
+      setF((p) => (p.id || p.date === today ? p : { ...p, date: today, time: nowHM() }));
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+  return manual;
+}
+
 const blankGlu = () => ({ id: null, date: toISO(new Date()), time: nowHM(), value: null, tag: "", note: "" });
 
 function Glicemia({ items, onSave, onDelete }) {
   const [f, setF] = useState(blankGlu);
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const manual = useFreshDate(setF);
+  const setWhen = (k, v) => { manual.current = true; set(k, v); };
+  const reset = () => { manual.current = false; reset(); };
   const today = toISO(new Date());
   const recenti = [...items].sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)).slice(0, 10);
 
@@ -925,7 +944,7 @@ function Glicemia({ items, onSave, onDelete }) {
           <h1 className="h1" style={{ marginBottom: 4 }}>{f.id ? "Modifica misurazione" : "Glicemia"}</h1>
           <p className="hint" style={{ margin: 0 }}>Il valore letto sul glucometro, con l'ora e il momento della giornata.</p>
         </div>
-        {f.id && <button type="button" className="iconbtn ghost" aria-label="Annulla la modifica" onClick={() => setF(blankGlu())}><X /></button>}
+        {f.id && <button type="button" className="iconbtn ghost" aria-label="Annulla la modifica" onClick={() => reset()}><X /></button>}
       </div>
 
       <Section title="Valore">
@@ -941,10 +960,10 @@ function Glicemia({ items, onSave, onDelete }) {
       <Section title="Quando">
         <div className="row">
           <input type="date" className="input" style={{ maxWidth: 190 }} value={f.date} max={today}
-            aria-label="Data" onChange={(e) => e.target.value && set("date", e.target.value)} />
-          <input type="time" className="input timein" value={f.time} aria-label="Ora" onChange={(e) => set("time", e.target.value)} />
+            aria-label="Data" onChange={(e) => e.target.value && setWhen("date", e.target.value)} />
+          <input type="time" className="input timein" value={f.time} aria-label="Ora" onChange={(e) => setWhen("time", e.target.value)} />
         </div>
-        <button type="button" className="linkbtn" onClick={() => setF((p) => ({ ...p, date: today, time: nowHM() }))}>Adesso</button>
+        <button type="button" className="linkbtn" onClick={() => { manual.current = false; setF((p) => ({ ...p, date: today, time: nowHM() })); }}>Adesso</button>
       </Section>
 
       <Section title="Momento">
@@ -957,7 +976,7 @@ function Glicemia({ items, onSave, onDelete }) {
 
       {f.id && (
         <div style={{ padding: "8px 0 4px" }}>
-          <ConfirmDelete label="Elimina questa misurazione" onConfirm={() => { onDelete(f.id); setF(blankGlu()); }} />
+          <ConfirmDelete label="Elimina questa misurazione" onConfirm={() => { onDelete(f.id); reset(); }} />
         </div>
       )}
 
@@ -983,7 +1002,7 @@ function Glicemia({ items, onSave, onDelete }) {
 
       <div className="savebar"><div className="inner">
         <button type="button" className="btn primary" disabled={f.value == null}
-          onClick={() => { onSave(f); setF(blankGlu()); }}>
+          onClick={() => { onSave(f); reset(); }}>
           {f.id ? "Salva le modifiche" : "Salva la misurazione"}
         </button>
       </div></div>
@@ -1013,6 +1032,9 @@ function BpReading({ f, n, set }) {
 function Pressione({ items, onSave, onDelete }) {
   const [f, setF] = useState(blankBp);
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const manual = useFreshDate(setF);
+  const setWhen = (k, v) => { manual.current = true; set(k, v); };
+  const reset = () => { manual.current = false; reset(); };
   const today = toISO(new Date());
   const a = bpAvg(f);
   const recenti = [...items].sort((x, y) => (y.date + y.time).localeCompare(x.date + x.time)).slice(0, 10);
@@ -1023,7 +1045,7 @@ function Pressione({ items, onSave, onDelete }) {
         <div className="mid">
           <h1 className="h1" style={{ marginBottom: 4 }}>{f.id ? "Modifica misurazione" : "Pressione"}</h1>
         </div>
-        {f.id && <button type="button" className="iconbtn ghost" aria-label="Annulla la modifica" onClick={() => setF(blankBp())}><X /></button>}
+        {f.id && <button type="button" className="iconbtn ghost" aria-label="Annulla la modifica" onClick={() => reset()}><X /></button>}
       </div>
 
       <Section title="Prima misurazione"><BpReading f={f} n={1} set={set} /></Section>
@@ -1044,10 +1066,10 @@ function Pressione({ items, onSave, onDelete }) {
       <Section title="Quando">
         <div className="row">
           <input type="date" className="input" style={{ maxWidth: 190 }} value={f.date} max={today}
-            aria-label="Data" onChange={(e) => e.target.value && set("date", e.target.value)} />
-          <input type="time" className="input timein" value={f.time} aria-label="Ora" onChange={(e) => set("time", e.target.value)} />
+            aria-label="Data" onChange={(e) => e.target.value && setWhen("date", e.target.value)} />
+          <input type="time" className="input timein" value={f.time} aria-label="Ora" onChange={(e) => setWhen("time", e.target.value)} />
         </div>
-        <button type="button" className="linkbtn" onClick={() => setF((p) => ({ ...p, date: today, time: nowHM() }))}>Adesso</button>
+        <button type="button" className="linkbtn" onClick={() => { manual.current = false; setF((p) => ({ ...p, date: today, time: nowHM() })); }}>Adesso</button>
       </Section>
 
       <Section title="Nota">
@@ -1056,7 +1078,7 @@ function Pressione({ items, onSave, onDelete }) {
 
       {f.id && (
         <div style={{ padding: "8px 0 4px" }}>
-          <ConfirmDelete label="Elimina questa misurazione" onConfirm={() => { onDelete(f.id); setF(blankBp()); }} />
+          <ConfirmDelete label="Elimina questa misurazione" onConfirm={() => { onDelete(f.id); reset(); }} />
         </div>
       )}
 
@@ -1087,7 +1109,7 @@ function Pressione({ items, onSave, onDelete }) {
 
       <div className="savebar"><div className="inner">
         <button type="button" className="btn primary" disabled={!a}
-          onClick={() => { onSave(f); setF(blankBp()); }}>
+          onClick={() => { onSave(f); reset(); }}>
           {f.id ? "Salva le modifiche" : "Salva la misurazione"}
         </button>
       </div></div>
