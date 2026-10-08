@@ -121,6 +121,7 @@ function monthStats(data, ym) {
     episodes: es.length,
     glu: (data.glucose || []).filter((g) => g.date.startsWith(ym) && g.value != null),
     bp: Object.values(bpByDay(data.bp || [], ym)),
+    weight: (data.weight || []).filter((w) => w.date.startsWith(ym) && w.kg != null).sort((a, b) => a.date.localeCompare(b.date)),
     epDur: avg(es.map((e) => duration(e.start, e.end))),
   };
 }
@@ -134,7 +135,7 @@ function noPoopStreak(nights) {
 }
 
 const monthsWithData = (data) =>
-  [...new Set([...data.nights, ...data.episodes, ...(data.glucose || []), ...(data.bp || [])].map((x) => x.date.slice(0, 7)))].sort();
+  [...new Set([...data.nights, ...data.episodes, ...(data.glucose || []), ...(data.bp || []), ...(data.weight || [])].map((x) => x.date.slice(0, 7)))].sort();
 
 function recentDistinct(items, field, max = 3) {
   const out = [];
@@ -215,7 +216,9 @@ function mergeData(stored, cur) {
   (cur.glucose || []).forEach((g) => gm.set(gk(g), g));
   const bm = new Map((stored.bp || []).map((b) => [gk(b), b]));
   (cur.bp || []).forEach((b) => bm.set(gk(b), b));
-  return { ...cur, therapy: [...tm.values()].map((t) => ({ ...t, id: t.id || uid() })), glucose: [...gm.values()].map((g) => ({ ...g, id: g.id || uid() })), bp: [...bm.values()].map((b) => ({ ...b, id: b.id || uid() })), nights: [...nm.values()].map((n) => ({ ...n, id: n.id || uid() })), episodes: [...em.values()].map((e) => ({ ...e, id: e.id || uid() })) };
+  const wm = new Map((stored.weight || []).map((w) => [w.date, w]));
+  (cur.weight || []).forEach((w) => wm.set(w.date, w));
+  return { ...cur, weight: [...wm.values()].map((w) => ({ ...w, id: w.id || uid() })), therapy: [...tm.values()].map((t) => ({ ...t, id: t.id || uid() })), glucose: [...gm.values()].map((g) => ({ ...g, id: g.id || uid() })), bp: [...bm.values()].map((b) => ({ ...b, id: b.id || uid() })), nights: [...nm.values()].map((n) => ({ ...n, id: n.id || uid() })), episodes: [...em.values()].map((e) => ({ ...e, id: e.id || uid() })) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -239,14 +242,14 @@ function buildWorkbook(data) {
 
   // Riepilogo
   const months = monthsWithData(data);
-  const rh = ["Mese", "Notti registrate", "Media risvegli", "Media min. assistenza", "Mie ore di sonno (media)", "Notti agitate (>=2)", "Episodi diurni", "Durata media episodi (min)", "Pressione media"];
+  const rh = ["Mese", "Notti registrate", "Media risvegli", "Media min. assistenza", "Mie ore di sonno (media)", "Notti agitate (>=2)", "Episodi diurni", "Durata media episodi (min)", "Pressione media", "Peso medio (kg)"];
   const rrows = months.map((ym) => {
     const s = monthStats(data, ym);
     const bm = bpMean(s.bp);
-    return [monthLabel(ym), s.nights, round1(s.wakes), round1(s.assist), round1(s.mySleep), s.agitated, s.episodes, round1(s.epDur), bm ? `${bm.sys}/${bm.dia}` : null];
+    return [monthLabel(ym), s.nights, round1(s.wakes), round1(s.assist), round1(s.mySleep), s.agitated, s.episodes, round1(s.epDur), bm ? `${bm.sys}/${bm.dia}` : null, round1(avg(s.weight.map((w) => w.kg)))];
   });
   const wsR = XLSX.utils.aoa_to_sheet([rh, ...rrows]);
-  wsR["!cols"] = [16, 15, 14, 20, 22, 18, 14, 24, 16].map((w) => ({ wch: w }));
+  wsR["!cols"] = [16, 15, 14, 20, 22, 18, 14, 24, 16, 15].map((w) => ({ wch: w }));
   XLSX.utils.book_append_sheet(wb, wsR, "Riepilogo");
 
   // Diario notti
@@ -303,6 +306,16 @@ function buildWorkbook(data) {
     XLSX.utils.book_append_sheet(wb, wsB, "Pressione");
   }
 
+  // Peso
+  const wts = [...(data.weight || [])].sort((a, b) => a.date.localeCompare(b.date));
+  if (wts.length) {
+    const wrows = wts.map((w) => [serial(w.date), w.kg, w.note || null]);
+    const wsW = XLSX.utils.aoa_to_sheet([["Data", "Peso (kg)", "Note"], ...wrows]);
+    fmtCells(wsW, wrows.length, 0, "dd/mm/yyyy");
+    wsW["!cols"] = [12, 10, 40].map((w) => ({ wch: w }));
+    XLSX.utils.book_append_sheet(wb, wsW, "Peso");
+  }
+
   // Terapia
   const th = ["Ora", "Farmaci", "Note"];
   const ther = [...(data.therapy || [])].sort((a, b) => (a.time || "").localeCompare(b.time || ""));
@@ -325,7 +338,7 @@ function xlsxFile(data) {
 }
 
 function backupFile(data) {
-  const text = JSON.stringify({ nights: data.nights, episodes: data.episodes, therapy: data.therapy || [], glucose: data.glucose || [], bp: data.bp || [], savedAt: new Date().toISOString() }, null, 1);
+  const text = JSON.stringify({ nights: data.nights, episodes: data.episodes, therapy: data.therapy || [], glucose: data.glucose || [], bp: data.bp || [], weight: data.weight || [], savedAt: new Date().toISOString() }, null, 1);
   return new File([text], `diario_backup_${toISO(new Date())}.json`, { type: "application/json" });
 }
 
@@ -395,10 +408,11 @@ async function parseXlsx(file) {
     s1: cellNum(r[2]), d1: cellNum(r[3]), p1: cellNum(r[4]), s2: cellNum(r[5]), d2: cellNum(r[6]), p2: cellNum(r[7]),
     note: cellTxt(r[11]),
   })).filter((b) => bpAvg(b));
+  const weight = rowsOf("Peso").map((r) => ({ date: serToISO(r[0]), kg: cellNum(r[1]), note: cellTxt(r[2]) })).filter((w) => w.kg != null);
   const therapy = rowsOf("Terapia", "Ora").map((r) => ({
     time: fracToHM(r[0]), meds: cellTxt(r[1]), note: cellTxt(r[2]),
   })).filter((t) => t.time);
-  return { nights, episodes, therapy, glucose, bp };
+  return { nights, episodes, therapy, glucose, bp, weight };
 }
 
 function downloadFile(file) {
@@ -501,7 +515,7 @@ const CSS = `
 .bprow{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
 .bprow label{display:flex;flex-direction:column;gap:4px;}
 .bprow .input{font-size:22px;font-weight:700;text-align:center;padding:0 4px;}
-.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:8px 0 16px;}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin:8px 0 16px;}
 .seg button{height:46px;border:none;background:transparent;}
 .seg button[aria-pressed="true"]{background:var(--raised);font-weight:700;color:var(--accent);}
 .mhead{font-size:15px;color:var(--muted);margin:18px 0 8px;font-weight:700;}
@@ -918,7 +932,7 @@ function useFreshDate(setF) {
     const onVis = () => {
       if (document.visibilityState !== "visible" || manual.current) return;
       const today = toISO(new Date());
-      setF((p) => (p.id || p.date === today ? p : { ...p, date: today, time: nowHM() }));
+      setF((p) => (p.id || p.date === today ? p : { ...p, date: today, ...("time" in p && { time: nowHM() }) }));
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
@@ -933,7 +947,7 @@ function Glicemia({ items, onSave, onDelete }) {
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const manual = useFreshDate(setF);
   const setWhen = (k, v) => { manual.current = true; set(k, v); };
-  const reset = () => { manual.current = false; reset(); };
+  const reset = () => { manual.current = false; setF(blankGlu()); };
   const today = toISO(new Date());
   const recenti = [...items].sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)).slice(0, 10);
 
@@ -1034,7 +1048,7 @@ function Pressione({ items, onSave, onDelete }) {
   const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
   const manual = useFreshDate(setF);
   const setWhen = (k, v) => { manual.current = true; set(k, v); };
-  const reset = () => { manual.current = false; reset(); };
+  const reset = () => { manual.current = false; setF(blankBp()); };
   const today = toISO(new Date());
   const a = bpAvg(f);
   const recenti = [...items].sort((x, y) => (y.date + y.time).localeCompare(x.date + x.time)).slice(0, 10);
@@ -1117,16 +1131,95 @@ function Pressione({ items, onSave, onDelete }) {
   );
 }
 
-// Glicemia e pressione condividono la scheda: la barra in basso non ha posto per un'altra icona
-function Misure({ kind, setKind, glucose, bp, onSaveGlu, onDeleteGlu, onSaveBp, onDeleteBp }) {
+const blankWeight = () => ({ id: null, date: toISO(new Date()), txt: "", note: "" });
+
+function Peso({ items, onSave, onDelete }) {
+  const [f, setF] = useState(blankWeight);
+  const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+  const manual = useFreshDate(setF);
+  const reset = () => { manual.current = false; setF(blankWeight()); };
+  const today = toISO(new Date());
+  const kg = parseDec(f.txt);
+  const ok = kg != null && kg > 0 && kg < 400;
+  const recenti = [...items].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10);
+  const same = !f.id && items.find((w) => w.date === f.date);
+
+  return (
+    <div>
+      <div className="nighthead">
+        <div className="mid">
+          <h1 className="h1" style={{ marginBottom: 4 }}>{f.id ? "Modifica pesata" : "Peso"}</h1>
+        </div>
+        {f.id && <button type="button" className="iconbtn ghost" aria-label="Annulla la modifica" onClick={() => reset()}><X /></button>}
+      </div>
+
+      <Section title="Peso">
+        <div className="row">
+          <input className="input" style={{ maxWidth: 140, fontSize: 26, fontWeight: 700 }}
+            inputMode="decimal" aria-label="Peso in chili" placeholder="--,-"
+            value={f.txt} onChange={(e) => set("txt", e.target.value.replace(/[^\d.,]/g, "").slice(0, 5))} />
+          <span className="unit">kg</span>
+        </div>
+      </Section>
+
+      <Section title="Quando">
+        <div className="row">
+          <input type="date" className="input" style={{ maxWidth: 190 }} value={f.date} max={today}
+            aria-label="Data" onChange={(e) => { if (e.target.value) { manual.current = true; set("date", e.target.value); } }} />
+        </div>
+        {f.date !== today && <button type="button" className="linkbtn" onClick={() => { manual.current = false; set("date", today); }}>Oggi</button>}
+        {same && <p className="hint" style={{ margin: "8px 0 0" }}>C'è già una pesata in questo giorno ({fmtNum(same.kg)} kg): salvando la sostituisci.</p>}
+      </Section>
+
+      <Section title="Nota">
+        <input className="input" value={f.note} onChange={(e) => set("note", e.target.value)} />
+      </Section>
+
+      {f.id && (
+        <div style={{ padding: "8px 0 4px" }}>
+          <ConfirmDelete label="Elimina questa pesata" onConfirm={() => { onDelete(f.id); reset(); }} />
+        </div>
+      )}
+
+      {!!recenti.length && (
+        <section className="sec">
+          <h2 className="sech">Ultime pesate</h2>
+          <div style={{ height: 8 }} />
+          {recenti.map((w) => (
+            <button key={w.id} type="button" className="entry" style={{ "--c": "var(--accent)" }}
+              onClick={() => setF({ id: w.id, date: w.date, txt: fmtNum(w.kg), note: w.note || "" })}>
+              <span className="bar" />
+              <span className="grow">
+                <span className="t">{fmtNum(w.kg)} <span className="muted small">kg</span></span>
+                <span className="d"><span>{fmtDayShort(w.date)} {MESI[fromISO(w.date).getMonth()].slice(0, 3).toLowerCase()}</span></span>
+                {w.note && <span className="n">{w.note}</span>}
+              </span>
+            </button>
+          ))}
+        </section>
+      )}
+
+      <div className="savebar"><div className="inner">
+        <button type="button" className="btn primary" disabled={!ok}
+          onClick={() => { onSave({ id: f.id, date: f.date, kg: Math.round(kg * 10) / 10, note: f.note }); reset(); }}>
+          {f.id ? "Salva le modifiche" : "Salva la pesata"}
+        </button>
+      </div></div>
+    </div>
+  );
+}
+
+// Glicemia, pressione e peso condividono la scheda: la barra in basso non ha posto per un'altra icona
+function Misure({ kind, setKind, glucose, bp, weight, onSaveGlu, onDeleteGlu, onSaveBp, onDeleteBp, onSaveWeight, onDeleteWeight }) {
   return (
     <div>
       <div className="seg" style={{ marginTop: 6 }}>
         <button type="button" aria-pressed={kind === "glicemia"} onClick={() => setKind("glicemia")}>Glicemia</button>
         <button type="button" aria-pressed={kind === "pressione"} onClick={() => setKind("pressione")}>Pressione</button>
+        <button type="button" aria-pressed={kind === "peso"} onClick={() => setKind("peso")}>Peso</button>
       </div>
-      {kind === "pressione"
-        ? <Pressione items={bp} onSave={onSaveBp} onDelete={onDeleteBp} />
+      {kind === "pressione" ? <Pressione items={bp} onSave={onSaveBp} onDelete={onDeleteBp} />
+        : kind === "peso" ? <Peso items={weight} onSave={onSaveWeight} onDelete={onDeleteWeight} />
         : <Glicemia items={glucose} onSave={onSaveGlu} onDelete={onDeleteGlu} />}
     </div>
   );
@@ -1322,6 +1415,60 @@ function BpChart({ data, ym }) {
   );
 }
 
+// Il peso cambia lentamente e le pesate sono rade: il grafico copre gli ultimi sei mesi fino a quello scelto.
+// La scala segue i valori del periodo, con almeno 4 kg di escursione
+const WEIGHT_MONTHS = 6;
+
+function weightWindow(weight, ym) {
+  const [y, m] = ym.split("-").map(Number);
+  const from = toISO(new Date(y, m - WEIGHT_MONTHS, 1)), to = toISO(new Date(y, m, 0));
+  return { from, to, list: (weight || []).filter((w) => w.kg != null && w.date >= from && w.date <= to).sort((a, b) => a.date.localeCompare(b.date)) };
+}
+
+function WeightChart({ from, to, list }) {
+  const dayMs = 86400000;
+  const t0 = fromISO(from).getTime();
+  const span = Math.round((fromISO(to).getTime() - t0) / dayMs) + 1;
+  const kgs = list.map((w) => w.kg);
+  let lo = Math.floor(Math.min(...kgs) - 1), hi = Math.ceil(Math.max(...kgs) + 1);
+  if (hi - lo < 4) { const c = Math.round((lo + hi) / 2); lo = c - 2; hi = c + 2; }
+  const W = 366, top = 14, base = 92;
+  const xOf = (iso) => 4 + (Math.round((fromISO(iso).getTime() - t0) / dayMs) + 0.5) / span * (W - 8);
+  const yOf = (v) => base - ((v - lo) / (hi - lo)) * (base - top);
+  const last = list[list.length - 1];
+  const f = fromISO(from);
+  const months = Array.from({ length: WEIGHT_MONTHS }, (_, k) => toISO(new Date(f.getFullYear(), f.getMonth() + k, 1)));
+
+  return (
+    <svg className="chart" viewBox={`0 0 ${W} ${base + 22}`} width="100%" role="img"
+      aria-label={`Peso degli ultimi ${WEIGHT_MONTHS} mesi: un punto per pesata, uniti da una linea`}>
+      {[lo, hi].map((v) => (
+        <g key={v}>
+          <line x1="0" x2={W} y1={yOf(v)} y2={yOf(v)} style={{ stroke: "var(--line)" }} strokeDasharray="3 3" />
+          <text x={W - 2} y={yOf(v) - 2} fontSize="8" textAnchor="end" style={{ fill: "var(--muted)" }}>{v} kg</text>
+        </g>
+      ))}
+      <line x1="0" x2={W} y1={base} y2={base} style={{ stroke: "var(--line)" }} />
+      {months.map((iso) => {
+        const x = xOf(iso) - 0.5 / span * (W - 8);
+        return (
+          <g key={iso}>
+            <line x1={x} x2={x} y1={base} y2={base + 4} style={{ stroke: "var(--line)" }} />
+            <text x={x + 3} y={base + 16} fontSize="8.5" style={{ fill: "var(--muted)" }}>{MESI[fromISO(iso).getMonth()].slice(0, 3)}</text>
+          </g>
+        );
+      })}
+      {list.length > 1 && (
+        <polyline points={list.map((w) => `${xOf(w.date)},${yOf(w.kg)}`).join(" ")} fill="none" strokeWidth="2"
+          strokeLinejoin="round" strokeLinecap="round" style={{ stroke: "var(--accent)" }} />
+      )}
+      {list.map((w) => <circle key={w.id || w.date} cx={xOf(w.date)} cy={yOf(w.kg)} r="3" style={{ fill: "var(--accent)" }} />)}
+      <text x={Math.min(Math.max(xOf(last.date), 14), W - 14)} y={yOf(last.kg) - 6} fontSize="8.5" fontWeight="700" textAnchor="middle"
+        style={{ fill: "var(--text)" }}>{fmtNum(last.kg)}</text>
+    </svg>
+  );
+}
+
 function Riepilogo({ data, onExport, onSettings }) {
   const months = monthsWithData(data);
   const cur = toISO(new Date()).slice(0, 7);
@@ -1408,6 +1555,27 @@ function Riepilogo({ data, onExport, onSettings }) {
         );
       })()}
 
+      {(() => {
+        const ww = weightWindow(data.weight, ym);
+        if (!ww.list.length) return null;
+        const first = ww.list[0], last = ww.list[ww.list.length - 1];
+        const diff = Math.round((last.kg - first.kg) * 10) / 10;
+        const pct = Math.round((Math.abs(diff) / first.kg) * 1000) / 10;
+        return (
+          <section className="sec">
+            <h2 className="sech">Peso</h2>
+            <div style={{ height: 4 }} />
+            <WeightChart {...ww} />
+            <p className="hint" style={{ marginTop: 8 }}>
+              Gli ultimi {WEIGHT_MONTHS} mesi, un punto per pesata.
+              {ww.list.length > 1
+                ? <> Da {fmtNum(first.kg)} kg ({fmtDayShort(first.date)} {MESI[fromISO(first.date).getMonth()].slice(0, 3)}) a {fmtNum(last.kg)} kg: {diff === 0 ? "invariato" : `${diff > 0 ? "+" : "−"}${fmtNum(Math.abs(diff))} kg, ${diff > 0 ? "+" : "−"}${fmtNum(pct)}%`}, su {plural(ww.list.length, "pesata", "pesate")}.</>
+                : <> Per ora una sola pesata: {fmtNum(last.kg)} kg.</>}
+            </p>
+          </section>
+        );
+      })()}
+
       <section className="sec">
         <table className="stats"><tbody>
           <tr><td>Media risvegli</td><td>{fmtNum(s.wakes)}</td></tr>
@@ -1430,7 +1598,7 @@ function Riepilogo({ data, onExport, onSettings }) {
 
       <section className="sec">
         <button type="button" className="btn wide" onClick={onExport}><Download size={20} />Scarica Excel per la visita</button>
-        <p className="hint" style={{ marginTop: 8 }}>Contiene il riepilogo di tutti i mesi, il diario delle notti, gli episodi, la glicemia, la pressione e la terapia. Una volta scaricato lo condividi dai download, con il tasto condividi del telefono.</p>
+        <p className="hint" style={{ marginTop: 8 }}>Contiene il riepilogo di tutti i mesi, il diario delle notti, gli episodi, la glicemia, la pressione, il peso e la terapia. Una volta scaricato lo condividi dai download, con il tasto condividi del telefono.</p>
       </section>
     </div>
   );
@@ -1522,7 +1690,7 @@ function SettingsSheet({ data, onClose, onImport, onRestore, onExport, onClear, 
 /* ------------------------------------------------------------------ */
 
 export default function App() {
-  const [data, setData] = useState({ nights: [], episodes: [], therapy: [], glucose: [], bp: [], theme: "night" });
+  const [data, setData] = useState({ nights: [], episodes: [], therapy: [], glucose: [], bp: [], weight: [], theme: "night" });
   const [status, setStatus] = useState("loading"); // loading | ready | memory | unreadable
   const [saveErr, setSaveErr] = useState(null);
   const [notice, setNotice] = useState(null); // { kind, detail }
@@ -1550,7 +1718,7 @@ export default function App() {
     if (r.status === "ok") {
       const d = r.data || {};
       setData((cur) => {
-        const loaded = { nights: d.nights || [], episodes: d.episodes || [], therapy: d.therapy || [], glucose: d.glucose || [], bp: d.bp || [], theme: d.theme || cur.theme || "night" };
+        const loaded = { nights: d.nights || [], episodes: d.episodes || [], therapy: d.therapy || [], glucose: d.glucose || [], bp: d.bp || [], weight: d.weight || [], theme: d.theme || cur.theme || "night" };
         // se nel frattempo era stato inserito qualcosa, lo tengo
         if (cur.nights.length || cur.episodes.length) { skipSave.current = false; return mergeData(loaded, cur); }
         return loaded;
@@ -1677,6 +1845,17 @@ export default function App() {
     toast("Misurazione eliminata");
   };
 
+  // Una pesata per giorno: salvarne una nello stesso giorno sostituisce la precedente
+  const saveWeight = (w) => {
+    const isNew = !w.id;
+    setData((d) => ({ ...d, weight: [...(d.weight || []).filter((x) => x.id !== w.id && x.date !== w.date), { ...w, id: w.id || uid() }] }));
+    toast(isNew ? "Pesata salvata" : "Pesata aggiornata");
+  };
+  const deleteWeight = (id) => {
+    setData((d) => ({ ...d, weight: (d.weight || []).filter((x) => x.id !== id) }));
+    toast("Pesata eliminata");
+  };
+
   const mergeIn = (inc, msg) => {
     setData((d) => {
       const nm = new Map(d.nights.map((n) => [n.date, n]));
@@ -1691,19 +1870,21 @@ export default function App() {
       (inc.glucose || []).forEach((g) => gm.set(gk(g), { ...g, id: gm.get(gk(g))?.id || uid() }));
       const bm = new Map((d.bp || []).map((b) => [gk(b), b]));
       (inc.bp || []).forEach((b) => bm.set(gk(b), { ...b, id: bm.get(gk(b))?.id || uid() }));
-      return { ...d, nights: [...nm.values()], episodes: [...em.values()], therapy: [...tm.values()], glucose: [...gm.values()], bp: [...bm.values()] };
+      const wm = new Map((d.weight || []).map((w) => [w.date, w]));
+      (inc.weight || []).forEach((w) => wm.set(w.date, { ...w, id: wm.get(w.date)?.id || uid() }));
+      return { ...d, weight: [...wm.values()], nights: [...nm.values()], episodes: [...em.values()], therapy: [...tm.values()], glucose: [...gm.values()], bp: [...bm.values()] };
     });
     setNonce((x) => x + 1);
     toast(msg || `Importate ${plural(inc.nights.length, "notte", "notti")} e ${plural(inc.episodes.length, "episodio", "episodi")}`);
   };
   const restore = (d) => {
-    setData((old) => ({ ...old, nights: d.nights.map((n) => ({ ...n, id: n.id || uid() })), episodes: d.episodes.map((e) => ({ ...e, id: e.id || uid() })), therapy: (d.therapy || []).map((t) => ({ ...t, id: t.id || uid() })), glucose: (d.glucose || []).map((g) => ({ ...g, id: g.id || uid() })), bp: (d.bp || []).map((b) => ({ ...b, id: b.id || uid() })) }));
+    setData((old) => ({ ...old, nights: d.nights.map((n) => ({ ...n, id: n.id || uid() })), episodes: d.episodes.map((e) => ({ ...e, id: e.id || uid() })), therapy: (d.therapy || []).map((t) => ({ ...t, id: t.id || uid() })), glucose: (d.glucose || []).map((g) => ({ ...g, id: g.id || uid() })), bp: (d.bp || []).map((b) => ({ ...b, id: b.id || uid() })), weight: (d.weight || []).map((w) => ({ ...w, id: w.id || uid() })) }));
     setNonce((x) => x + 1);
     setShowSettings(false);
     toast("Backup ripristinato");
   };
   const clearAll = () => {
-    setData((d) => ({ ...d, nights: [], episodes: [], therapy: [], glucose: [], bp: [] }));
+    setData((d) => ({ ...d, nights: [], episodes: [], therapy: [], glucose: [], bp: [], weight: [] }));
     setNonce((x) => x + 1);
     setShowSettings(false);
     toast("Dati cancellati");
@@ -1787,8 +1968,8 @@ export default function App() {
               <Terapia items={data.therapy || []} onSave={saveTherapy} onDelete={deleteTherapy} />
             )}
             {tab === "glicemia" && (
-              <Misure kind={measureKind} setKind={setMeasureKind} glucose={data.glucose || []} bp={data.bp || []}
-                onSaveGlu={saveGlucose} onDeleteGlu={deleteGlucose} onSaveBp={saveBp} onDeleteBp={deleteBp} />
+              <Misure kind={measureKind} setKind={setMeasureKind} glucose={data.glucose || []} bp={data.bp || []} weight={data.weight || []}
+                onSaveGlu={saveGlucose} onDeleteGlu={deleteGlucose} onSaveBp={saveBp} onDeleteBp={deleteBp} onSaveWeight={saveWeight} onDeleteWeight={deleteWeight} />
             )}
             {tab === "diario" && (
               <Diario data={data} onSettings={() => setShowSettings(true)}

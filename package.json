@@ -1,8 +1,8 @@
 {
   "name": "diario-assistenza",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "Diario delle notti, degli episodi, della terapia, della glicemia e della pressione per chi assiste una persona con demenza.",
+  "description": "Diario delle notti, degli episodi, della terapia, della glicemia, della pressione e del peso per chi assiste una persona con demenza.",
   "license": "GPL-3.0-or-later",
   "author": "na103",
   "scripts": {
